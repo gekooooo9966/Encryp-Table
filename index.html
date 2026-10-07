@@ -284,6 +284,8 @@ input[type="text"], input[type="number"], select {
 input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
 #key { font-family: var(--font-mono); font-size: 16px; text-transform: uppercase; letter-spacing: .14em; width: 14ch; max-width: 100%; }
 #shift { font-family: var(--font-mono); font-size: 16px; width: 9ch; }
+.field.dim { opacity: .45; transition: opacity .3s; }
+.field.dim::after { content: "Solo al cifrar"; font-size: 11.5px; color: var(--muted); font-weight: 700; }
 .check { display: flex; gap: 8px; align-items: center; min-height: 40px; cursor: pointer; font-weight: 600; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
 input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -557,6 +559,16 @@ footer p { margin: 0; }
       <select id="alpha">
         <option value="en">A–Z (26 letras)</option>
         <option value="es">Español con Ñ (27 letras)</option>
+      </select>
+    </div>
+    <div class="field" id="f-fmt">
+      <label class="label" for="fmt">Formato al enviar</label>
+      <select id="fmt">
+        <option value="normal">Normal</option>
+        <option value="join">Juntar palabras al azar</option>
+        <option value="solid">Todo junto, sin signos</option>
+        <option value="g5">Bloques de 5 letras</option>
+        <option value="g4">Bloques de 4 letras</option>
       </select>
     </div>
     <label class="check" for="strip"><input type="checkbox" id="strip" checked> Quitar tildes (á → a)</label>
@@ -1064,6 +1076,29 @@ var Cipher = (function () {
     state.prevSig = sig;
   }
 
+  /* Formato al enviar: se aplica después de cifrar, así que no cambia cómo se descifra */
+  var fmtEl = $("fmt"), fmtField = $("f-fmt");
+  try { var savedFmt = localStorage.getItem("vig-fmt"); if (savedFmt) fmtEl.value = savedFmt; } catch (e) {}
+  function seeded(str) {
+    var h = 2166136261;
+    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return function () { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return (h >>> 0) / 4294967296; };
+  }
+  function shapeOutput(out, fmt, A) {
+    if (fmt === "normal" || !out) return out;
+    var lettersOnly = function (s) { return Array.from(s.toUpperCase()).filter(function (c) { return A.indexOf(c) >= 0; }).join(""); };
+    if (fmt === "join") {
+      var rnd = seeded(out);
+      var words = out.split(/\s+/).filter(Boolean), res = words[0] || "";
+      for (var i = 1; i < words.length; i++) res += (rnd() < .6 ? "" : " ") + words[i];
+      return res;
+    }
+    var flat = lettersOnly(out);
+    if (fmt === "solid") return flat;
+    var size = fmt === "g4" ? 4 : 5;
+    return (flat.match(new RegExp(".{1," + size + "}", "gu")) || []).join(" ");
+  }
+
   function run() {
     var A = ALPHAS[alphaEl.value], enc = mode() === "enc", def = CIPHERS[current];
     state.A = A;
@@ -1072,6 +1107,8 @@ var Cipher = (function () {
     shiftEl.max = A.length - 1;
     seg.classList.toggle("is-dec", !enc);
     var res = process(input.value, current, A, enc, stripEl.checked);
+    fmtField.classList.toggle("dim", !enc);
+    if (enc) res.out = shapeOutput(res.out, fmtEl.value, A);
     state.steps = res.steps; state.out = res.out;
     if (state.sel >= Math.min(res.steps.length, MAX_STEPS)) state.sel = 0;
     renderOutput(res.out);
@@ -1119,6 +1156,10 @@ var Cipher = (function () {
   });
   [input, keyEl, shiftEl].forEach(function (el) { el.addEventListener("input", run); });
   [alphaEl, stripEl].forEach(function (el) { el.addEventListener("change", run); });
+  fmtEl.addEventListener("change", function () {
+    try { localStorage.setItem("vig-fmt", fmtEl.value); } catch (e) {}
+    state.prevOut = ""; run();
+  });
   document.querySelectorAll('input[name="mode"]').forEach(function (el) { el.addEventListener("change", run); });
   $("clear").addEventListener("click", function () { input.value = ""; state.sel = 0; run(); input.focus(); });
   $("swap").addEventListener("click", function () {
